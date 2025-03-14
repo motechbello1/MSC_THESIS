@@ -1,0 +1,11 @@
+%%writefile requirements.txt
+streamlit
+tensorflow
+numpy
+pandas
+opencv-python
+matplotlib
+shap
+joblib
+scikit-learn
+localtunnel
