@@ -1,10 +1,10 @@
 streamlit
-tensorflow
+shap
+matplotlib
 numpy
 pandas
-opencv-python
-matplotlib
-shap
-joblib
+scipy
 scikit-learn
-localtunnel
+tensorflow  # (If you're using deep learning)
+torch  # (If using PyTorch)
+opencv-python-headless  # (For image processing)
