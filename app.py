@@ -108,9 +108,10 @@ if model_choice == "CNN + LSTM":
         st.subheader("SHAP Explanation for CNN Model")
 
         # Define SHAP explainer
-        global cnn_explainer
+        global cnn_explainer  # Move this line up before assignment
+        
         if cnn_explainer is None:
-            cnn_explainer = shap.Explainer(cnn_model, X_images[:50])
+            cnn_explainer = shap.Explainer(cnn_model, X_images[:50])  # Initialize SHAP
         
         # Compute SHAP values
         shap_values = cnn_explainer(X_images[:5])
@@ -119,3 +120,4 @@ if model_choice == "CNN + LSTM":
         st.set_option('deprecation.showPyplotGlobalUse', False)
         shap.image_plot(shap_values, X_images[:5])
         st.pyplot()
+
