@@ -8,3 +8,4 @@ scikit-learn
 tensorflow  # (If you're using deep learning)
 torch  # (If using PyTorch)
 opencv-python-headless  # (For image processing)
+shap==0.41.0
