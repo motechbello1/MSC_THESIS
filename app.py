@@ -2,122 +2,93 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import shap
-import matplotlib.pyplot as plt
-import seaborn as sns
 import cv2
 import tensorflow as tf
 from tensorflow.keras.models import load_model
+from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, roc_auc_score
-from sklearn.model_selection import train_test_split
-from tensorflow.keras.utils import to_categorical
 import joblib
+import matplotlib.pyplot as plt
 
-# Initialize global variables
-cnn_explainer = None  
-cnn_model = None  
-rf_model = None  
-log_reg_model = None  
+# Load Models
+cnn_model = load_model("models/malaria_cnn.h5")  # CNN Model
+rf_model = joblib.load("models/random_forest.pkl")  # Random Forest
+logistic_model = joblib.load("models/logistic_regression.pkl")  # Logistic Regression
 
-# Set Streamlit page config
-st.set_page_config(page_title="Malaria Detection", layout="wide")
+# Load Scaler
+scaler = joblib.load("models/scaler.pkl")  # StandardScaler for clinical data
 
-# Title
-st.title("🦠 Malaria Detection & Prediction System")
+# Initialize SHAP Explainer (Global Variable)
+cnn_explainer = None
 
-# Sidebar for file upload
-st.sidebar.header("Upload Data")
-clinical_file = st.sidebar.file_uploader("Upload Clinical Data (CSV)", type=["csv"])
-image_dir = st.sidebar.text_input("Enter Path to Malaria Images")
+# Streamlit UI
+st.title("Malaria Prediction App")
+st.write("Upload clinical data and cell image to predict malaria.")
 
-# Load clinical data
-if clinical_file:
-    clinical_data = pd.read_csv(clinical_file)
-    st.write("### Clinical Data Preview", clinical_data.head())
+# Select Model
+model_choice = st.selectbox(
+    "Choose a Model:",
+    ["Random Forest", "Logistic Regression", "CNN + LSTM"]
+)
 
-    # Preprocessing
-    st.write("### Clinical Data Preprocessing")
-    clinical_data = pd.get_dummies(clinical_data, drop_first=True)
-    st.write(clinical_data.head())
+# Upload Clinical Data
+clinical_file = st.file_uploader("Upload Clinical Data (CSV)", type=["csv"])
 
-# Load malaria images
-IMG_SIZE = 64
+# Upload Image
+image_file = st.file_uploader("Upload Cell Image (JPG/PNG)", type=["jpg", "png"])
 
-def load_images(image_dir):
-    images, labels = [], []
-    if image_dir:
-        for category in ["Parasitized", "Uninfected"]:
-            path = f"{image_dir}/{category}"
-            label = 1 if category == "Parasitized" else 0
-            for img_name in os.listdir(path)[:100]:  # Limit to 100 for speed
-                img_path = os.path.join(path, img_name)
-                img = cv2.imread(img_path)
-                img = cv2.resize(img, (IMG_SIZE, IMG_SIZE))
-                images.append(img)
-                labels.append(label)
-    return np.array(images) / 255.0, np.array(labels)
+# Process Clinical Data
+def preprocess_clinical_data(data):
+    data = data.fillna(data.median())  # Handle missing values
+    categorical_cols = ["Gender", "Fever", "BodyPain"]
+    data = pd.get_dummies(data, columns=categorical_cols, drop_first=True)
+    data_scaled = scaler.transform(data)
+    return data_scaled
 
-if image_dir:
-    X_images, y_images = load_images(image_dir)
-    st.write(f"Loaded {len(X_images)} images.")
+# Process Image
+def preprocess_image(image):
+    img = cv2.imdecode(np.frombuffer(image.read(), np.uint8), 1)  # Read image
+    img = cv2.resize(img, (64, 64)) / 255.0  # Normalize
+    img = np.expand_dims(img, axis=0)  # Add batch dimension
+    return img
 
-# Model Selection
-st.sidebar.header("Select Model")
-model_choice = st.sidebar.selectbox("Choose Model", ["Logistic Regression", "Random Forest", "CNN + LSTM"])
+if st.button("Predict"):
+    if not clinical_file or not image_file:
+        st.error("Please upload both clinical data and an image.")
+    else:
+        # Read Clinical Data
+        clinical_data = pd.read_csv(clinical_file)
+        X_clinical = preprocess_clinical_data(clinical_data)
 
-# Train/Test Split
-if clinical_file:
-    X_clinical = clinical_data.drop("malaria_test_result", axis=1)
-    y_clinical = clinical_data["malaria_test_result"]
-    
-    X_train, X_test, y_train, y_test = train_test_split(X_clinical, y_clinical, test_size=0.2, random_state=42)
+        # Read and Process Image
+        X_image = preprocess_image(image_file)
 
-    if model_choice == "Logistic Regression":
-        log_reg_model = LogisticRegression()
-        log_reg_model.fit(X_train, y_train)
-        preds = log_reg_model.predict(X_test)
-        acc = accuracy_score(y_test, preds)
-        roc = roc_auc_score(y_test, preds)
+        # Perform Prediction
+        if model_choice == "Random Forest":
+            prediction = rf_model.predict(X_clinical)[0]
+            explanation = "Random Forest uses decision trees for classification."
+        elif model_choice == "Logistic Regression":
+            prediction = logistic_model.predict(X_clinical)[0]
+            explanation = "Logistic Regression is a statistical model for binary classification."
+        elif model_choice == "CNN + LSTM":
+            cnn_pred = cnn_model.predict(X_image)[0][0]
+            prediction = 1 if cnn_pred > 0.5 else 0  # Convert probability to label
+            explanation = "CNN + LSTM predicts malaria based on image features."
 
-        st.write(f"### Logistic Regression Results")
-        st.write(f"**Accuracy:** {acc:.2f}")
-        st.write(f"**AUC-ROC Score:** {roc:.2f}")
+            # SHAP Explanation (if CNN selected)
+            global cnn_explainer
+            if cnn_explainer is None:
+                cnn_explainer = shap.Explainer(cnn_model, X_image)
+            shap_values = cnn_explainer(X_image)
 
-    elif model_choice == "Random Forest":
-        rf_model = RandomForestClassifier(n_estimators=100)
-        rf_model.fit(X_train, y_train)
-        preds = rf_model.predict(X_test)
-        acc = accuracy_score(y_test, preds)
-        roc = roc_auc_score(y_test, preds)
+            # Show SHAP Explanation
+            st.subheader("SHAP Explanation for CNN Model")
+            fig, ax = plt.subplots()
+            shap.image_plot(shap_values, X_image, show=False)
+            st.pyplot(fig)
 
-        st.write(f"### Random Forest Results")
-        st.write(f"**Accuracy:** {acc:.2f}")
-        st.write(f"**AUC-ROC Score:** {roc:.2f}")
-
-    elif model_choice == "CNN + LSTM":
-        if image_dir:
-            cnn_model = load_model("cnn_model.h5")  # Load pre-trained CNN
-            lstm_model = load_model("lstm_model.h5")  # Load pre-trained LSTM
-            
-            st.write("CNN + LSTM Model Loaded ✅")
-
-# SHAP Explainability for CNN
-if model_choice == "CNN + LSTM":
-    if image_dir and cnn_model:
-        st.subheader("SHAP Explanation for CNN Model")
-
-        # Define SHAP explainer
-        global cnn_explainer  # Move this line up before assignment
-        
-        if cnn_explainer is None:
-            cnn_explainer = shap.Explainer(cnn_model, X_images[:50])  # Initialize SHAP
-        
-        # Compute SHAP values
-        shap_values = cnn_explainer(X_images[:5])
-
-        # Plot SHAP
-        st.set_option('deprecation.showPyplotGlobalUse', False)
-        shap.image_plot(shap_values, X_images[:5])
-        st.pyplot()
-
+        # Show Prediction
+        st.subheader("Prediction Result")
+        st.write(f"**Prediction:** {'Positive (Malaria)' if prediction == 1 else 'Negative (No Malaria)'}")
+        st.write(f"**Model Explanation:** {explanation}")
