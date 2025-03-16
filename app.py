@@ -19,7 +19,7 @@ logistic_model = joblib.load("models/logistic_regression.pkl")  # Logistic Regre
 # Load Scaler
 scaler = joblib.load("models/scaler.pkl")  # StandardScaler for clinical data
 
-# Initialize SHAP Explainer (Global Variable)
+# Initialize SHAP Explainer (at script level)
 cnn_explainer = None
 
 # Streamlit UI
@@ -76,10 +76,9 @@ if st.button("Predict"):
             prediction = 1 if cnn_pred > 0.5 else 0  # Convert probability to label
             explanation = "CNN + LSTM predicts malaria based on image features."
 
-            # SHAP Explanation (if CNN selected)
-            global cnn_explainer
+            # SHAP Explanation (Corrected)
             if cnn_explainer is None:
-                cnn_explainer = shap.Explainer(cnn_model, X_image)
+                cnn_explainer = shap.Explainer(cnn_model, X_image)  # Create explainer once
             shap_values = cnn_explainer(X_image)
 
             # Show SHAP Explanation
